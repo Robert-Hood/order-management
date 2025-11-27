@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  customerName   String
+  customerPhone  String
+
+  // totals
+  amount         Float       // final total AFTER discount (used already)
+  subtotal       Float       @default(0)  // BEFORE discount
+  discountPercent Float      @default(0)  // % applied (e.g. 10 for 10%)
+  discountAmount Float       @default(0)  // absolute discount value
+  discountNote   String?                // optional note
+
+  createdAt      DateTime    @default(now())
+  items          OrderItem[]
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  name      String
+  price     Float
+  cost      Float
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  orders    OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  lineTotal Float
+  createdAt DateTime @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
