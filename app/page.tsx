@@ -293,12 +293,25 @@ export default function Home() {
               Customer phone
             </label>
             <input
+              type="tel"
               className="w-full border rounded px-3 py-2 text-sm text-black"
               value={customerPhone}
-              onChange={e => setCustomerPhone(e.target.value)}
+              onChange={e => {
+                const value = e.target.value.replace(/\D/g, '');
+                if (value.length <= 10) {
+                  setCustomerPhone(value);
+                }
+              }}
               placeholder="e.g. 9876543210"
+              pattern="[0-9]{10}"
+              maxLength={10}
               required
             />
+            {customerPhone.length > 0 && customerPhone.length < 10 && (
+              <p className="text-xs text-red-600 mt-1">
+                Phone number must be exactly 10 digits
+              </p>
+            )}
           </div>
 
           {/* Items builder */}
