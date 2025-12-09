@@ -9,12 +9,25 @@ type Product = {
     price: number;
 };
 
+type OrderItemModifier = {
+    id: string;
+    nameAtTime: string;
+    priceAtTime: number;
+    costAtTime: number;
+    modifier: {
+        id: string;
+        name: string;
+        price: number;
+    };
+};
+
 type OrderItem = {
     id: string;
     quantity: number;
     unitPrice: number;
     lineTotal: number;
     product: Product;
+    modifiers: OrderItemModifier[];
 };
 
 type Order = {
@@ -112,48 +125,70 @@ export default function OrdersPage() {
                                 </div>
 
                                 <div className="mt-1 space-y-0.5">
-                                    {order.items.map(item => (
-                                        <div
-                                            key={item.id}
-                                            className="text-[11px] text-gray-600"
-                                        >
-                                            {item.quantity} × {item.product.name} (
-                                            ₹{item.unitPrice.toFixed(0)}) = ₹
-                                            {item.lineTotal.toFixed(0)}
-                                        </div>
-                                    ))}
+                                    {order.items.map(item => {
+                                        const toppingsPerUnit = item.modifiers.reduce(
+                                            (sum, m) => sum + m.priceAtTime,
+                                            0,
+                                        );
+                                        const basePriceAtTime = item.unitPrice - toppingsPerUnit;
+
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className="text-[11px] text-gray-600 mb-0.5"
+                                            >
+                                                <div>
+                                                    {item.quantity} × {item.product.name} = ₹
+                                                    {item.lineTotal.toFixed(0)}
+                                                </div>
+                                                <div className="text-[10px] text-gray-500">
+                                                    ₹{item.unitPrice.toFixed(0)} each
+                                                    {item.modifiers.length > 0 ? (
+                                                        <>
+                                                            {' '}
+                                                            = ₹{basePriceAtTime.toFixed(0)} base
+                                                            {item.modifiers.map(m => (
+                                                                <span key={m.id}>
+                                                                    {' '}
+                                                                    + ₹{m.priceAtTime.toFixed(0)} {m.nameAtTime}
+                                                                </span>
+                                                            ))}
+                                                        </>
+                                                    ) : (
+                                                        <> (base price)</>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
                                 </div>
                             </div>
 
-                            <div className="text-right">
-                                <div className="text-right text-xs">
-                                    {order.discountPercent > 0 && order.subtotal > 0 ? (
-                                        <>
-                                            <div className="text-xs text-red-600 line-through">
-                                                ₹{order.subtotal.toFixed(0)}
-                                            </div>
-                                            <div className="font-semibold text-sm text-green-600">
-                                                ₹{order.amount.toFixed(0)}
-                                            </div>
-                                            <div className="text-[11px] text-gray-600">
-                                                -{order.discountPercent}% (₹{order.discountAmount.toFixed(0)})
-                                            </div>
-                                            {order.discountNote && (
-                                                <div className="text-[10px] text-gray-500 mt-0.5">
-                                                    {order.discountNote}
-                                                </div>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <div className="font-semibold text-sm text-black">
+                            <div className="text-right text-xs">
+                                {order.discountPercent > 0 && order.subtotal > 0 ? (
+                                    <>
+                                        <div className="text-xs text-red-600 line-through">
+                                            ₹{order.subtotal.toFixed(0)}
+                                        </div>
+                                        <div className="font-semibold text-sm text-green-600">
                                             ₹{order.amount.toFixed(0)}
                                         </div>
-                                    )}
-                                    <div className="text-[10px] text-gray-500">
-                                        {new Date(order.createdAt).toLocaleString()}
+                                        <div className="text-[11px] text-gray-600">
+                                            -{order.discountPercent}% (₹
+                                            {order.discountAmount.toFixed(0)})
+                                        </div>
+                                        {order.discountNote && (
+                                            <div className="text-[10px] text-gray-500 mt-0.5">
+                                                {order.discountNote}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div className="font-semibold text-sm text-black">
+                                        ₹{order.amount.toFixed(0)}
                                     </div>
-                                </div>
-
+                                )}
                                 <div className="text-[10px] text-gray-500">
                                     {new Date(order.createdAt).toLocaleString()}
                                 </div>

@@ -9,30 +9,31 @@ datasource db {
 
 
 model Order {
-  id             String      @id @default(cuid())
-  customerName   String
-  customerPhone  String
+  id              String      @id @default(cuid())
+  customerName    String
+  customerPhone   String
 
   // totals
-  amount         Float       // final total AFTER discount (used already)
-  subtotal       Float       @default(0)  // BEFORE discount
-  discountPercent Float      @default(0)  // % applied (e.g. 10 for 10%)
-  discountAmount Float       @default(0)  // absolute discount value
-  discountNote   String?                // optional note
+  amount          Float       // final total AFTER discount
+  subtotal        Float       @default(0)
+  discountPercent Float       @default(0)
+  discountAmount  Float       @default(0)
+  discountNote    String?
 
-  createdAt      DateTime    @default(now())
-  items          OrderItem[]
+  createdAt       DateTime    @default(now())
+  items           OrderItem[]
 }
 
 model Product {
-  id        String   @id @default(cuid())
-  name      String
-  price     Float
-  cost      Float
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  name         String
+  price        Float
+  cost         Float
+  isActive     Boolean  @default(true)
+  hasModifiers Boolean  @default(false)   // <-- NEW
 
-  orders    OrderItem[]
+  createdAt    DateTime @default(now())
+  orders       OrderItem[]
 }
 
 model OrderItem {
@@ -44,6 +45,38 @@ model OrderItem {
   lineTotal Float
   createdAt DateTime @default(now())
 
-  order   Order   @relation(fields: [orderId], references: [id])
-  product Product @relation(fields: [productId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+
+  modifiers OrderItemModifier[]         // <-- NEW relation
+}
+
+// NEW: global modifiers / toppings
+model Modifier {
+  id        String   @id @default(cuid())
+  name      String
+  price     Float
+  cost      Float
+  type      String   @default("topping")  // future-flexible
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  orderItemModifiers OrderItemModifier[]
+}
+
+// NEW: selected modifiers per line item
+model OrderItemModifier {
+  id           String   @id @default(cuid())
+  orderItemId  String
+  modifierId   String
+
+  // snapshot fields for price integrity
+  nameAtTime   String
+  priceAtTime  Float
+  costAtTime   Float
+
+  createdAt    DateTime @default(now())
+
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id])
+  modifier     Modifier  @relation(fields: [modifierId], references: [id])
 }

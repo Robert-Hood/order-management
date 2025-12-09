@@ -4,6 +4,7 @@ import { prisma } from '../../../lib/db';
 type IncomingItem = {
   productId: string;
   quantity: number;
+  modifierIds?: string[]; // NEW
 };
 
 export async function GET() {
@@ -14,6 +15,11 @@ export async function GET() {
         items: {
           include: {
             product: true,
+            modifiers: {
+              include: {
+                modifier: true,
+              },
+            },
           },
         },
       },
@@ -24,7 +30,7 @@ export async function GET() {
     console.error('GET /api/orders error:', err);
     return NextResponse.json(
       { error: 'Failed to fetch orders' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -46,25 +52,29 @@ export async function POST(req: NextRequest) {
       discountNote?: string;
     } = body;
 
-    if (!customerName || !customerPhone) {
+    const phone = (customerPhone ?? '').trim();
+
+    if (!customerName ) {
       return NextResponse.json(
-        { error: 'customerName and customerPhone are required' },
-        { status: 400 }
+        { error: 'customerName is required' },
+        { status: 400 },
       );
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
         { error: 'At least one item is required' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const normalisedItems = items.map(i => ({
       productId: i.productId,
       quantity: Math.max(1, Number(i.quantity) || 1),
+      modifierIds: Array.isArray(i.modifierIds) ? i.modifierIds : [],
     }));
 
+    // Load all products we need
     const productIds = [...new Set(normalisedItems.map(i => i.productId))];
 
     const products = await prisma.product.findMany({
@@ -74,33 +84,70 @@ export async function POST(req: NextRequest) {
     if (products.length !== productIds.length) {
       return NextResponse.json(
         { error: 'One or more products not found' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const productMap = new Map(products.map(p => [p.id, p]));
 
+    // Load all modifiers (toppings) we need
+    const allModifierIds = [
+      ...new Set(
+        normalisedItems.flatMap(i => i.modifierIds),
+      ),
+    ].filter(Boolean);
+
+    const modifiers =
+      allModifierIds.length > 0
+        ? await prisma.modifier.findMany({
+            where: { id: { in: allModifierIds }, isActive: true },
+          })
+        : [];
+
+    const modifierMap = new Map(modifiers.map(m => [m.id, m]));
+
+    // Build order items with nested modifiers
     const orderItemsData = normalisedItems.map(i => {
       const product = productMap.get(i.productId)!;
-      const unitPrice = product.price;
+
+      const appliedModifiers = i.modifierIds
+        .map(id => modifierMap.get(id))
+        .filter((m): m is NonNullable<typeof m> => !!m);
+
+      // price per unit:
+      const toppingsPerUnit = appliedModifiers.reduce(
+        (sum, m) => sum + m.price,
+        0,
+      );
+      const unitPrice = product.price + toppingsPerUnit;
       const lineTotal = unitPrice * i.quantity;
+
+      const modifiersCreate = appliedModifiers.map(m => ({
+        modifierId: m.id,
+        nameAtTime: m.name,
+        priceAtTime: m.price,
+        costAtTime: m.cost,
+      }));
 
       return {
         productId: product.id,
         quantity: i.quantity,
         unitPrice,
         lineTotal,
+        modifiers: {
+          create: modifiersCreate,
+        },
       };
     });
 
     const subtotal = orderItemsData.reduce(
       (sum, item) => sum + item.lineTotal,
-      0
+      0,
     );
 
     const safePercent = Math.max(
       0,
-      Math.min(100, Number(discountPercent) || 0)
+      Math.min(100, Number(discountPercent) || 0),
     );
     const discountAmount = (subtotal * safePercent) / 100;
     const finalAmount = subtotal - discountAmount;
@@ -108,7 +155,7 @@ export async function POST(req: NextRequest) {
     const order = await prisma.order.create({
       data: {
         customerName,
-        customerPhone,
+        customerPhone: phone,
         amount: finalAmount,
         subtotal,
         discountPercent: safePercent,
@@ -122,6 +169,11 @@ export async function POST(req: NextRequest) {
         items: {
           include: {
             product: true,
+            modifiers: {
+              include: {
+                modifier: true,
+              },
+            },
           },
         },
       },
@@ -132,7 +184,7 @@ export async function POST(req: NextRequest) {
     console.error('POST /api/orders error:', err);
     return NextResponse.json(
       { error: 'Something went wrong' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
