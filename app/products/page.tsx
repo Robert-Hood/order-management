@@ -338,7 +338,7 @@ export default function ProductsPage() {
                 </label>
                 <input
                   type="number"
-                  className="w-full border rounded px-3 py-2 text-xs text-black"
+                  className="w-full border rounded px-3 py-2 text-sm text-black"
                   value={modifierPrice}
                   onChange={e => setModifierPrice(e.target.value)}
                   required
@@ -350,7 +350,7 @@ export default function ProductsPage() {
                 </label>
                 <input
                   type="number"
-                  className="w-full border rounded px-3 py-2 text-xs text-black"
+                  className="w-full border rounded px-3 py-2 text-sm text-black"
                   value={modifierCost}
                   onChange={e => setModifierCost(e.target.value)}
                   required
