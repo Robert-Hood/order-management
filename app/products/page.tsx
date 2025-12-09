@@ -311,7 +311,7 @@ export default function ProductsPage() {
         {/* Modifier management */}
         <section className="bg-white rounded-lg shadow p-4 space-y-3">
           <h2 className="text-sm font-semibold text-gray-800">
-            Toppings (modifiers)
+            Toppings
           </h2>
 
           <form
@@ -319,11 +319,11 @@ export default function ProductsPage() {
             className="space-y-2"
           >
             <div>
-              <label className="block text-xs font-medium mb-1 text-black">
+              <label className="block text-sm font-medium mb-1 text-black">
                 Topping name
               </label>
               <input
-                className="w-full border rounded px-3 py-2 text-xs text-black"
+                className="w-full border rounded px-3 py-2 text-sm text-black"
                 value={modifierName}
                 onChange={e => setModifierName(e.target.value)}
                 placeholder="e.g. Nuts, Caramel, Berries"
@@ -333,7 +333,7 @@ export default function ProductsPage() {
 
             <div className="flex gap-2">
               <div className="flex-1">
-                <label className="block text-xs font-medium mb-1 text-black">
+                <label className="block text-sm font-medium mb-1 text-black">
                   Price (₹)
                 </label>
                 <input
@@ -345,7 +345,7 @@ export default function ProductsPage() {
                 />
               </div>
               <div className="flex-1">
-                <label className="block text-xs font-medium mb-1 text-black">
+                <label className="block text-sm font-medium mb-1 text-black">
                   Cost (₹)
                 </label>
                 <input
@@ -361,7 +361,7 @@ export default function ProductsPage() {
             <button
               type="submit"
               disabled={submittingModifier}
-              className="w-full bg-gray-800 text-white py-2 rounded-lg text-xs font-medium hover:bg-gray-900 disabled:opacity-60"
+              className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
             >
               {submittingModifier ? 'Adding topping...' : 'Add topping'}
             </button>
