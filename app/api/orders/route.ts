@@ -10,6 +10,9 @@ type IncomingItem = {
 export async function GET() {
   try {
     const orders = await prisma.order.findMany({
+      where: {
+        deletedAt: null, // Only fetch non-deleted orders
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         items: {

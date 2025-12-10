@@ -21,6 +21,7 @@ model Order {
   discountNote    String?
 
   createdAt       DateTime    @default(now())
+  deletedAt       DateTime?   // soft delete - null means active
   items           OrderItem[]
 }
 
