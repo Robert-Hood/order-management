@@ -489,9 +489,9 @@ export default function Home() {
               if (!showToppings) return null;
 
               return (
-                <div className="mt-2">
-                  <div className="text-xs font-medium text-black mb-1">
-                    Toppings
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <div className="text-sm font-medium text-black">
+                    Toppings:
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {modifiers.map(mod => {
@@ -534,15 +534,17 @@ export default function Home() {
                     <div className="font-medium">
                       {item.product.name}
                     </div>
-                    <div className="text-[11px] text-gray-600">
-                      {item.quantity} × ₹{item.unitPrice.toFixed(0)}
-                    </div>
-                    {item.appliedModifiers.length > 0 && (
+                    {item.appliedModifiers.length > 0 ? (
                       <div className="text-[11px] text-gray-600">
-                        +{' '}
-                        {item.appliedModifiers
-                          .map(m => m.name)
-                          .join(', ')}
+                        {item.quantity} × ₹{item.product.price.toFixed(0)}
+                        {item.appliedModifiers.map(m => (
+                          <span key={m.id}> + ₹{m.price.toFixed(0)} {m.name}</span>
+                        ))}
+                        {' '}= ₹{item.unitPrice.toFixed(0)}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-gray-600">
+                        {item.quantity} × ₹{item.unitPrice.toFixed(0)}
                       </div>
                     )}
                   </div>
