@@ -4,17 +4,90 @@ import { prisma } from '../../../lib/db';
 type IncomingItem = {
   productId: string;
   quantity: number;
-  modifierIds?: string[]; // NEW
+  modifierIds?: string[];
 };
+
+/**
+ * Async function to handle customer creation/update.
+ * This runs after order creation to avoid adding latency.
+ * 
+ * Logic:
+ * - If phone is empty → do nothing (order exists without customer)
+ * - If phone exists in DB → update name if different, update stats
+ * - If phone doesn't exist → create new customer
+ */
+async function handleCustomerAsync(
+  orderId: string,
+  customerName: string,
+  customerPhone: string,
+  orderAmount: number,
+) {
+  try {
+    // Find existing customer by phone
+    const existingCustomer = await prisma.customer.findUnique({
+      where: { phone: customerPhone },
+    });
+
+    if (existingCustomer) {
+      // Customer exists - update name if different, update stats
+      const updates: {
+        name?: string;
+        orderCount: { increment: number };
+        totalSpent: { increment: number };
+        lastOrderAt: Date;
+      } = {
+        orderCount: { increment: 1 },
+        totalSpent: { increment: orderAmount },
+        lastOrderAt: new Date(),
+      };
+
+      // Only update name if it's different
+      if (existingCustomer.name !== customerName) {
+        updates.name = customerName;
+      }
+
+      await prisma.$transaction([
+        prisma.customer.update({
+          where: { id: existingCustomer.id },
+          data: updates,
+        }),
+        prisma.order.update({
+          where: { id: orderId },
+          data: { customerId: existingCustomer.id },
+        }),
+      ]);
+    } else {
+      // New customer - create and link to order
+      const newCustomer = await prisma.customer.create({
+        data: {
+          phone: customerPhone,
+          name: customerName,
+          orderCount: 1,
+          totalSpent: orderAmount,
+          lastOrderAt: new Date(),
+        },
+      });
+
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { customerId: newCustomer.id },
+      });
+    }
+  } catch (err) {
+    // Log error but don't fail - customer linking is non-critical
+    console.error('handleCustomerAsync error:', err);
+  }
+}
 
 export async function GET() {
   try {
     const orders = await prisma.order.findMany({
       where: {
-        deletedAt: null, // Only fetch non-deleted orders
+        deletedAt: null,
       },
       orderBy: { createdAt: 'desc' },
       include: {
+        customer: true,
         items: {
           include: {
             product: true,
@@ -57,7 +130,7 @@ export async function POST(req: NextRequest) {
 
     const phone = (customerPhone ?? '').trim();
 
-    if (!customerName ) {
+    if (!customerName) {
       return NextResponse.json(
         { error: 'customerName is required' },
         { status: 400 },
@@ -77,37 +150,35 @@ export async function POST(req: NextRequest) {
       modifierIds: Array.isArray(i.modifierIds) ? i.modifierIds : [],
     }));
 
-    // Load all products we need
-    const productIds = [...new Set(normalisedItems.map(i => i.productId))];
+  // Prepare IDs for lookup
+  const productIds = [...new Set(normalisedItems.map(i => i.productId))];
+  const allModifierIds = [
+    ...new Set(normalisedItems.flatMap(i => i.modifierIds)),
+  ].filter(Boolean);
 
-    const products = await prisma.product.findMany({
+  // OPTIMIZATION: Fetch products and modifiers in PARALLEL instead of sequential
+  // This saves one full round-trip to the database (~250ms with cross-region latency)
+  const [products, modifiers] = await Promise.all([
+    prisma.product.findMany({
       where: { id: { in: productIds } },
-    });
+    }),
+    allModifierIds.length > 0
+      ? prisma.modifier.findMany({
+          where: { id: { in: allModifierIds }, isActive: true },
+        })
+      : Promise.resolve([]),
+  ]);
 
-    if (products.length !== productIds.length) {
-      return NextResponse.json(
-        { error: 'One or more products not found' },
-        { status: 400 },
-      );
-    }
+  if (products.length !== productIds.length) {
+    return NextResponse.json(
+      { error: 'One or more products not found' },
+      { status: 400 },
+    );
+  }
 
-    const productMap = new Map(products.map(p => [p.id, p]));
+  const productMap = new Map(products.map(p => [p.id, p]));
+  const modifierMap = new Map(modifiers.map(m => [m.id, m]));
 
-    // Load all modifiers (toppings) we need
-    const allModifierIds = [
-      ...new Set(
-        normalisedItems.flatMap(i => i.modifierIds),
-      ),
-    ].filter(Boolean);
-
-    const modifiers =
-      allModifierIds.length > 0
-        ? await prisma.modifier.findMany({
-            where: { id: { in: allModifierIds }, isActive: true },
-          })
-        : [];
-
-    const modifierMap = new Map(modifiers.map(m => [m.id, m]));
 
     // Build order items with nested modifiers
     const orderItemsData = normalisedItems.map(i => {
@@ -117,7 +188,6 @@ export async function POST(req: NextRequest) {
         .map(id => modifierMap.get(id))
         .filter((m): m is NonNullable<typeof m> => !!m);
 
-      // price per unit:
       const toppingsPerUnit = appliedModifiers.reduce(
         (sum, m) => sum + m.price,
         0,
@@ -155,6 +225,7 @@ export async function POST(req: NextRequest) {
     const discountAmount = (subtotal * safePercent) / 100;
     const finalAmount = subtotal - discountAmount;
 
+    // Create order first (without customer link - will be updated async)
     const order = await prisma.order.create({
       data: {
         customerName,
@@ -169,6 +240,7 @@ export async function POST(req: NextRequest) {
         },
       },
       include: {
+        customer: true,
         items: {
           include: {
             product: true,
@@ -181,6 +253,13 @@ export async function POST(req: NextRequest) {
         },
       },
     });
+
+    // Handle customer creation/update asynchronously
+    // Only if phone number is provided (10 digits)
+    if (phone.length === 10) {
+      // Fire and forget - don't await
+      handleCustomerAsync(order.id, customerName, phone, finalAmount);
+    }
 
     return NextResponse.json(order, { status: 201 });
   } catch (err) {

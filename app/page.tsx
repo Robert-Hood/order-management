@@ -375,6 +375,12 @@ export default function Home() {
               All orders
             </Link>
             <Link
+              href="/customers"
+              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
+            >
+              Customers
+            </Link>
+            <Link
               href="/products"
               className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
             >

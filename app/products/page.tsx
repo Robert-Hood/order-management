@@ -233,13 +233,19 @@ export default function ProductsPage() {
               href="/"
               className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
             >
-              Orders
+              New order
             </Link>
             <Link
               href="/orders"
               className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
             >
               All orders
+            </Link>
+            <Link
+              href="/customers"
+              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
+            >
+              Customers
             </Link>
           </div>
         </nav>
