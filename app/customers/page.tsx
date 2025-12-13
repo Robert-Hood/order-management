@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import AppNav from '../../components/AppNav';
 
 type Customer = {
   id: string;
@@ -142,9 +142,13 @@ export default function CustomersPage() {
         }),
       });
 
+      const data = await res.json().catch(() => null);
+
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || 'Failed to create customer');
+        // 409 = duplicate phone - expected business logic, not an error
+        // Just show the message to user without console.error
+        setFormError(data?.error || 'Failed to create customer');
+        return;
       }
 
       // Reset form and refresh list
@@ -153,10 +157,9 @@ export default function CustomersPage() {
       setShowAddForm(false);
       await fetchCustomers();
     } catch (err) {
-      console.error(err);
-      const message =
-        err instanceof Error ? err.message : 'Failed to create customer';
-      setFormError(message);
+      // Only log unexpected errors (network failures, etc.)
+      console.error('Unexpected error creating customer:', err);
+      setFormError('Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -190,29 +193,13 @@ export default function CustomersPage() {
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
       <div className="w-full max-w-xl">
-        <nav className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-black">👥 Customers</h1>
-          <div className="flex gap-2 text-sm">
-            <Link
-              href="/"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              New order
-            </Link>
-            <Link
-              href="/orders"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              All orders
-            </Link>
-            <Link
-              href="/products"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              Products
-            </Link>
-          </div>
-        </nav>
+        <AppNav />
+
+        {/* Page Title */}
+        <h1 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
+          <span>👥</span>
+          <span>Customers</span>
+        </h1>
 
         {/* Add Customer Section */}
         <div className="mb-4">

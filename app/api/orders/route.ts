@@ -79,13 +79,75 @@ async function handleCustomerAsync(
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    
+    // Pagination
+    const limit = url.searchParams.get('limit');
+    const take = limit ? Math.min(100, Math.max(1, parseInt(limit, 10))) : undefined;
+    
+    // Date range filters
+    const startDate = url.searchParams.get('start');
+    const endDate = url.searchParams.get('end');
+    
+    // Search filter (customer name or phone)
+    const search = url.searchParams.get('search')?.trim();
+    
+    // Product filter
+    const productId = url.searchParams.get('productId');
+    
+    // Discount filter: 'yes', 'no', or undefined for all
+    const hasDiscount = url.searchParams.get('hasDiscount');
+
+    // Build where clause
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {
+      deletedAt: null,
+    };
+
+    // Date range
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) {
+        where.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+
+    // Search by customer name or phone
+    if (search) {
+      where.OR = [
+        { customerName: { contains: search, mode: 'insensitive' } },
+        { customerPhone: { contains: search } },
+      ];
+    }
+
+    // Discount filter
+    if (hasDiscount === 'yes') {
+      where.discountPercent = { gt: 0 };
+    } else if (hasDiscount === 'no') {
+      where.discountPercent = { equals: 0 };
+    }
+
+    // For product filter, we need to check if any order item has this product
+    // This requires a nested filter
+    if (productId) {
+      where.items = {
+        some: {
+          productId: productId,
+        },
+      };
+    }
+
     const orders = await prisma.order.findMany({
-      where: {
-        deletedAt: null,
-      },
+      where,
       orderBy: { createdAt: 'desc' },
+      take,
       include: {
         customer: true,
         items: {

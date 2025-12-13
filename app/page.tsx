@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import AppNav from '../components/AppNav';
 
 type Product = {
   id: string;
@@ -68,6 +68,9 @@ export default function Home() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [modifiers, setModifiers] = useState<Modifier[]>([]);
+  const [hasMoreOrders, setHasMoreOrders] = useState(false);
+  const [visibleOrderCount, setVisibleOrderCount] = useState(10);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -187,26 +190,40 @@ export default function Home() {
     );
   }
 
-  async function fetchOrders() {
+  async function fetchOrders(limit: number = 10, isLoadingMore: boolean = false) {
     try {
-      setLoadingOrders(true);
+      // Only show top loading indicator for initial load, not for "show more"
+      if (!isLoadingMore) {
+        setLoadingOrders(true);
+      }
       setError(null);
 
-      const res = await fetch('/api/orders');
+      // Fetch one extra to check if there are more
+      const res = await fetch(`/api/orders?limit=${limit + 1}`);
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || 'Failed to load orders');
       }
 
       const data = (await res.json()) as Order[];
-      setOrders(data);
+      
+      // Check if there are more orders than requested
+      if (data.length > limit) {
+        setHasMoreOrders(true);
+        setOrders(data.slice(0, limit));
+      } else {
+        setHasMoreOrders(false);
+        setOrders(data);
+      }
     } catch (err) {
       console.error(err);
       const message =
         err instanceof Error ? err.message : 'Failed to load orders';
       setError(message);
     } finally {
-      setLoadingOrders(false);
+      if (!isLoadingMore) {
+        setLoadingOrders(false);
+      }
     }
   }
 
@@ -273,7 +290,7 @@ export default function Home() {
   }
 
   useEffect(() => {
-    fetchOrders();
+    fetchOrders(visibleOrderCount);
     fetchProducts();
     fetchModifiers();
   }, []);
@@ -303,6 +320,14 @@ export default function Home() {
 
   function handleRemoveItem(id: number) {
     setItems(prev => prev.filter(i => i.id !== id));
+  }
+
+  async function handleShowMore() {
+    const newCount = visibleOrderCount + 10;
+    setVisibleOrderCount(newCount);
+    setLoadingMore(true);
+    await fetchOrders(newCount, true);
+    setLoadingMore(false);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -349,7 +374,7 @@ export default function Home() {
       setCustomDiscountPercent('0');
       setCustomFinalPrice('');
 
-      await fetchOrders();
+      await fetchOrders(visibleOrderCount);
     } catch (err) {
       console.error(err);
       const message =
@@ -363,31 +388,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
       <div className="w-full max-w-xl">
-        <nav className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-black">
-            🍽️ Sanrozill Orders
-          </h1>
-          <div className="flex gap-2 text-sm">
-            <Link
-              href="/orders"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              All orders
-            </Link>
-            <Link
-              href="/customers"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              Customers
-            </Link>
-            <Link
-              href="/products"
-              className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-            >
-              Products
-            </Link>
-          </div>
-        </nav>
+        <AppNav />
 
         <form
           onSubmit={handleSubmit}
@@ -824,6 +825,28 @@ export default function Home() {
               </div>
             </div>
           ))}
+
+          {/* Show more button */}
+          {hasMoreOrders && !loadingOrders && (
+            <button
+              type="button"
+              onClick={handleShowMore}
+              disabled={loadingMore}
+              className="w-full py-2 px-4 rounded-lg border border-gray-300 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-60"
+            >
+              {loadingMore ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Loading more...
+                </span>
+              ) : (
+                'Show more orders'
+              )}
+            </button>
+          )}
         </div>
       </div>
 

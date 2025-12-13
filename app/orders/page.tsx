@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import AppNav from '../../components/AppNav';
 
 type Product = {
     id: string;
@@ -43,8 +43,14 @@ type Order = {
     items: OrderItem[];
 };
 
+type ProductOption = {
+    id: string;
+    name: string;
+};
+
 export default function OrdersPage() {
     const [orders, setOrders] = useState<Order[]>([]);
+    const [products, setProducts] = useState<ProductOption[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleteModal, setDeleteModal] = useState<{ open: boolean; order: Order | null }>({
@@ -53,12 +59,70 @@ export default function OrdersPage() {
     });
     const [deleting, setDeleting] = useState(false);
 
+    // Filter state
+    const [showFilters, setShowFilters] = useState(false);
+    const [search, setSearch] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [productFilter, setProductFilter] = useState('');
+    const [discountFilter, setDiscountFilter] = useState<'all' | 'yes' | 'no'>('all');
+
+    // Debounce search
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearch(search);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [search]);
+
+    // Helper to get today's date in YYYY-MM-DD format
+    function getTodayString() {
+        const today = new Date();
+        return today.toISOString().split('T')[0];
+    }
+
+    async function fetchProducts() {
+        try {
+            const res = await fetch('/api/products');
+            if (res.ok) {
+                const data = await res.json();
+                setProducts(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch products:', err);
+        }
+    }
+
     async function fetchOrders() {
         try {
             setLoading(true);
             setError(null);
 
-            const res = await fetch('/api/orders');
+            // Build query params
+            const params = new URLSearchParams();
+            
+            if (debouncedSearch) {
+                params.set('search', debouncedSearch);
+            }
+            if (startDate) {
+                params.set('start', startDate);
+            }
+            if (endDate) {
+                params.set('end', endDate);
+            }
+            if (productFilter) {
+                params.set('productId', productFilter);
+            }
+            if (discountFilter !== 'all') {
+                params.set('hasDiscount', discountFilter);
+            }
+
+            const queryString = params.toString();
+            const url = `/api/orders${queryString ? `?${queryString}` : ''}`;
+
+            const res = await fetch(url);
             if (!res.ok) {
                 const data = await res.json().catch(() => null);
                 throw new Error(data?.error || 'Failed to load orders');
@@ -101,52 +165,228 @@ export default function OrdersPage() {
         }
     }
 
+    function clearFilters() {
+        setSearch('');
+        setStartDate('');
+        setEndDate('');
+        setProductFilter('');
+        setDiscountFilter('all');
+    }
+
+    const hasActiveFilters = debouncedSearch || startDate || endDate || productFilter || discountFilter !== 'all';
+
+    useEffect(() => {
+        fetchProducts();
+    }, []);
+
     useEffect(() => {
         fetchOrders();
-    }, []);
+    }, [debouncedSearch, startDate, endDate, productFilter, discountFilter]);
+
+    // Calculate summary stats for filtered results
+    const totalRevenue = orders.reduce((sum, o) => sum + o.amount, 0);
+    const totalDiscount = orders.reduce((sum, o) => sum + o.discountAmount, 0);
 
     return (
         <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
             <div className="w-full max-w-xl">
-                <nav className="flex items-center justify-between mb-4">
-                    <h1 className="text-2xl font-bold text-black">📋 All Orders</h1>
-                    <div className="flex gap-2 text-sm">
-                        <Link
-                            href="/"
-                            className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
+                <AppNav />
+
+                {/* Page Title + Filter Toggle */}
+                <div className="flex items-center justify-between mb-4">
+                    <h1 className="text-xl font-bold text-black flex items-center gap-2">
+                        <span>📋</span>
+                        <span>All Orders</span>
+                    </h1>
+                    <button
+                        type="button"
+                        onClick={() => setShowFilters(!showFilters)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                            showFilters || hasActiveFilters
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
                         >
-                            New order
-                        </Link>
-                        <Link
-                            href="/customers"
-                            className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-                        >
-                            Customers
-                        </Link>
-                        <Link
-                            href="/products"
-                            className="px-3 py-1 rounded-lg border border-gray-300 bg-white"
-                        >
-                            Products
-                        </Link>
+                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                        </svg>
+                        Filters
+                        {hasActiveFilters && (
+                            <span className="w-2 h-2 rounded-full bg-blue-600" />
+                        )}
+                    </button>
+                </div>
+
+                {/* Filters Panel */}
+                {showFilters && (
+                    <div className="bg-white rounded-lg shadow p-4 mb-4 space-y-3">
+                        {/* Search */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Search customer
+                            </label>
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Name or phone..."
+                                className="w-full border rounded px-3 py-2 text-sm text-black"
+                            />
+                        </div>
+
+                        {/* Date Range */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                    From
+                                </label>
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    max={endDate || getTodayString()}
+                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                    To
+                                </label>
+                                <input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    min={startDate}
+                                    max={getTodayString()}
+                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Product & Discount Filters */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                    Product
+                                </label>
+                                <select
+                                    value={productFilter}
+                                    onChange={(e) => setProductFilter(e.target.value)}
+                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
+                                >
+                                    <option value="">All products</option>
+                                    {products.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-600 mb-1">
+                                    Discount
+                                </label>
+                                <select
+                                    value={discountFilter}
+                                    onChange={(e) => setDiscountFilter(e.target.value as 'all' | 'yes' | 'no')}
+                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
+                                >
+                                    <option value="all">All orders</option>
+                                    <option value="yes">With discount</option>
+                                    <option value="no">No discount</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Clear Filters */}
+                        {hasActiveFilters && (
+                            <button
+                                type="button"
+                                onClick={clearFilters}
+                                className="text-sm text-blue-600 hover:text-blue-800"
+                            >
+                                Clear all filters
+                            </button>
+                        )}
                     </div>
-                </nav>
+                )}
+
+                {/* Results Summary */}
+                {!loading && orders.length > 0 && (
+                    <div className="bg-white rounded-lg shadow p-3 mb-4">
+                        <div className="flex justify-between text-xs text-gray-600">
+                            <span>
+                                {orders.length} order{orders.length !== 1 ? 's' : ''}
+                                {hasActiveFilters && ' (filtered)'}
+                            </span>
+                            <div className="flex gap-4">
+                                <span>Revenue: <strong className="text-green-600">₹{totalRevenue.toFixed(0)}</strong></span>
+                                {totalDiscount > 0 && (
+                                    <span>Discounts: <strong className="text-red-600">₹{totalDiscount.toFixed(0)}</strong></span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {error && (
                     <p className="text-sm text-red-600 mb-2">{error}</p>
                 )}
 
-                {loading && (
-                    <p className="text-sm text-gray-700">Loading orders...</p>
+                {/* Loading state - show overlay when filtering */}
+                {loading && orders.length > 0 && (
+                    <div className="bg-white rounded-lg shadow p-3 mb-4 flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span className="text-sm text-gray-600">Updating orders...</span>
+                    </div>
+                )}
+
+                {/* Initial loading */}
+                {loading && orders.length === 0 && (
+                    <div className="bg-white rounded-lg shadow p-6 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="text-sm text-gray-700">Loading orders...</span>
+                        </div>
+                    </div>
                 )}
 
                 {!loading && orders.length === 0 && !error && (
-                    <p className="text-sm text-gray-700">
-                        No orders yet.
-                    </p>
+                    <div className="bg-white rounded-lg shadow p-6 text-center">
+                        <div className="text-3xl mb-2">📭</div>
+                        <p className="text-sm text-gray-700">
+                            {hasActiveFilters ? 'No orders match your filters.' : 'No orders yet.'}
+                        </p>
+                        {hasActiveFilters && (
+                            <button
+                                type="button"
+                                onClick={clearFilters}
+                                className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+                            >
+                                Clear filters
+                            </button>
+                        )}
+                    </div>
                 )}
 
-                <div className="space-y-2">
+                {/* Orders list - show with slight opacity when loading */}
+                <div className={`space-y-2 ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
                     {orders.map(order => (
                         <div
                             key={order.id}
