@@ -83,6 +83,11 @@ export default function OrdersPage() {
         return today.toISOString().split('T')[0];
     }
 
+    // Helper to format discount percentage for display (rounded to 2 decimal places, trailing zeros removed)
+    function formatDiscountPercent(percent: number): string {
+        return percent.toFixed(2).replace(/\.?0+$/, '');
+    }
+
     async function fetchProducts() {
         try {
             const res = await fetch('/api/products');
@@ -475,7 +480,7 @@ export default function OrdersPage() {
                                                 ₹{order.amount.toFixed(0)}
                                             </div>
                                             <div className="text-[11px] text-gray-600">
-                                                -{order.discountPercent}% (₹
+                                                -{formatDiscountPercent(order.discountPercent)}% (₹
                                                 {order.discountAmount.toFixed(0)})
                                             </div>
                                             {order.discountNote && (

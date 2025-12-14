@@ -385,6 +385,11 @@ export default function Home() {
     }
   }
 
+  // Helper to format discount percentage for display (rounded to 2 decimal places, trailing zeros removed)
+  function formatDiscountPercent(percent: number): string {
+    return percent.toFixed(2).replace(/\.?0+$/, '');
+  }
+
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
       <div className="w-full max-w-xl">
@@ -671,9 +676,7 @@ export default function Home() {
                         ₹{finalTotal.toFixed(0)}
                       </div>
                       <div className="text-[11px] text-gray-600">
-                        Discount {discountPercent
-                          .toFixed(1)
-                          .replace(/\.0$/, '')}
+                        Discount {formatDiscountPercent(discountPercent)}
                         % (₹{discountAmount.toFixed(0)})
                       </div>
                     </>
@@ -804,7 +807,7 @@ export default function Home() {
                         ₹{order.amount.toFixed(0)}
                       </div>
                       <div className="text-[11px] text-gray-600">
-                        -{order.discountPercent}% (₹
+                        -{formatDiscountPercent(order.discountPercent)}% (₹
                         {order.discountAmount.toFixed(0)})
                       </div>
                       {order.discountNote && (

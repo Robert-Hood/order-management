@@ -65,11 +65,19 @@ const periodLabels: Record<Period, string> = {
   custom: 'Custom',
 };
 
+// Periods in order of most recent to least recent
+// If today has orders, all subsequent periods will too
+const orderedPeriods: Period[] = ['today', 'yesterday', 'week', 'month', 'all'];
+
 export default function StatsPage() {
-  const [period, setPeriod] = useState<Period>('today');
+  const [period, setPeriod] = useState<Period | null>(null);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Track which periods to show (periods from firstPeriodWithOrders onwards)
+  const [visiblePeriods, setVisiblePeriods] = useState<Period[]>([]);
+  const [loadingCounts, setLoadingCounts] = useState(true);
 
   // Custom date range state
   const [customStart, setCustomStart] = useState<string>('');
@@ -79,6 +87,43 @@ export default function StatsPage() {
   function getTodayString() {
     const today = new Date();
     return today.toISOString().split('T')[0];
+  }
+
+  // Optimized: Check periods in order, stop at first one with orders
+  // All subsequent periods are guaranteed to have orders too
+  async function findFirstPeriodWithOrders() {
+    try {
+      setLoadingCounts(true);
+
+      for (let i = 0; i < orderedPeriods.length; i++) {
+        const p = orderedPeriods[i];
+        const res = await fetch(`/api/stats?period=${p}`);
+        
+        if (res.ok) {
+          const data = await res.json();
+          if (data.summary.totalOrders > 0) {
+            // Found orders! Show this period and all subsequent ones
+            const periodsToShow = orderedPeriods.slice(i);
+            setVisiblePeriods(periodsToShow);
+            setPeriod(p);
+            setStats(data); // Reuse the data we already fetched
+            setLoadingCounts(false);
+            return;
+          }
+        }
+      }
+
+      // No orders in any period
+      setVisiblePeriods([]);
+      setPeriod('all');
+    } catch (err) {
+      console.error('Failed to check periods:', err);
+      // On error, show all periods and default to 'today'
+      setVisiblePeriods(orderedPeriods);
+      setPeriod('today');
+    } finally {
+      setLoadingCounts(false);
+    }
   }
 
   async function fetchStats(selectedPeriod: Period, start?: string, end?: string) {
@@ -108,16 +153,26 @@ export default function StatsPage() {
     }
   }
 
+  // Check periods on mount
   useEffect(() => {
+    findFirstPeriodWithOrders();
+  }, []);
+
+  // Fetch stats when period changes (but not on initial load - we already have data)
+  useEffect(() => {
+    if (period === null || loadingCounts) return;
+
     if (period === 'custom') {
-      // Only fetch if both dates are set
       if (customStart && customEnd) {
         fetchStats(period, customStart, customEnd);
       }
     } else {
-      fetchStats(period);
+      // Only fetch if we don't already have stats for this period
+      if (!stats || stats.period !== period) {
+        fetchStats(period);
+      }
     }
-  }, [period, customStart, customEnd]);
+  }, [period, customStart, customEnd, loadingCounts]);
 
   function formatCurrency(amount: number) {
     return `₹${amount.toFixed(0)}`;
@@ -145,30 +200,59 @@ export default function StatsPage() {
 
         {/* Period Selector */}
         <div className="bg-white rounded-lg shadow p-3 mb-4">
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(periodLabels) as Period[]).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => {
-                  setPeriod(p);
-                  // Initialize custom dates when switching to custom
-                  if (p === 'custom' && !customStart && !customEnd) {
-                    const today = getTodayString();
-                    setCustomStart(today);
-                    setCustomEnd(today);
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  period === p
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {periodLabels[p]}
-              </button>
-            ))}
-          </div>
+          {loadingCounts ? (
+            <div className="flex items-center justify-center gap-2 py-2">
+              <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-sm text-gray-600">Loading...</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {visiblePeriods.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPeriod(p)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      period === p
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {periodLabels[p]}
+                  </button>
+                ))}
+                {/* Always show Custom */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPeriod('custom');
+                    if (!customStart && !customEnd) {
+                      const today = getTodayString();
+                      setCustomStart(today);
+                      setCustomEnd(today);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    period === 'custom'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {periodLabels.custom}
+                </button>
+              </div>
+
+              {visiblePeriods.length === 0 && (
+                <p className="text-sm text-gray-500 mt-2">
+                  No orders yet. Use Custom to select a date range.
+                </p>
+              )}
+            </>
+          )}
 
           {/* Custom Date Range Inputs */}
           {period === 'custom' && (
