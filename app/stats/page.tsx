@@ -65,9 +65,35 @@ const periodLabels: Record<Period, string> = {
   custom: 'Custom',
 };
 
-// Periods in order of most recent to least recent
-// If today has orders, all subsequent periods will too
 const orderedPeriods: Period[] = ['today', 'yesterday', 'week', 'month', 'all'];
+
+// Determine which periods to show based on the latest order date
+function getVisiblePeriods(latestOrderDate: string | null): Period[] {
+  if (!latestOrderDate) return [];
+
+  const latest = new Date(latestOrderDate);
+  const now = new Date();
+
+  // Get start of today, yesterday, 7 days ago, start of month
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Check which period the latest order falls into
+  if (latest >= startOfToday) {
+    return ['today', 'yesterday', 'week', 'month', 'all'];
+  } else if (latest >= startOfYesterday) {
+    return ['yesterday', 'week', 'month', 'all'];
+  } else if (latest >= sevenDaysAgo) {
+    return ['week', 'month', 'all'];
+  } else if (latest >= startOfMonth) {
+    return ['month', 'all'];
+  } else {
+    return ['all'];
+  }
+}
 
 export default function StatsPage() {
   const [period, setPeriod] = useState<Period | null>(null);
@@ -75,50 +101,36 @@ export default function StatsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Track which periods to show (periods from firstPeriodWithOrders onwards)
   const [visiblePeriods, setVisiblePeriods] = useState<Period[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(true);
 
-  // Custom date range state
   const [customStart, setCustomStart] = useState<string>('');
   const [customEnd, setCustomEnd] = useState<string>('');
 
-  // Helper to get today's date in YYYY-MM-DD format
   function getTodayString() {
     const today = new Date();
     return today.toISOString().split('T')[0];
   }
 
-  // Optimized: Check periods in order, stop at first one with orders
-  // All subsequent periods are guaranteed to have orders too
-  async function findFirstPeriodWithOrders() {
+  // Fast: Single lightweight query to get latest order date
+  async function determineVisiblePeriods() {
     try {
       setLoadingCounts(true);
 
-      for (let i = 0; i < orderedPeriods.length; i++) {
-        const p = orderedPeriods[i];
-        const res = await fetch(`/api/stats?period=${p}`);
-        
-        if (res.ok) {
-          const data = await res.json();
-          if (data.summary.totalOrders > 0) {
-            // Found orders! Show this period and all subsequent ones
-            const periodsToShow = orderedPeriods.slice(i);
-            setVisiblePeriods(periodsToShow);
-            setPeriod(p);
-            setStats(data); // Reuse the data we already fetched
-            setLoadingCounts(false);
-            return;
-          }
-        }
-      }
+      const res = await fetch('/api/stats/latest');
+      if (!res.ok) throw new Error('Failed to fetch');
 
-      // No orders in any period
-      setVisiblePeriods([]);
-      setPeriod('all');
+      const { latestOrderDate } = await res.json();
+      const periods = getVisiblePeriods(latestOrderDate);
+
+      setVisiblePeriods(periods);
+
+      // Auto-select first visible period, or 'all' if none
+      const firstPeriod = periods[0] || 'all';
+      setPeriod(firstPeriod);
     } catch (err) {
-      console.error('Failed to check periods:', err);
-      // On error, show all periods and default to 'today'
+      console.error('Failed to determine periods:', err);
+      // On error, show all periods
       setVisiblePeriods(orderedPeriods);
       setPeriod('today');
     } finally {
@@ -153,12 +165,12 @@ export default function StatsPage() {
     }
   }
 
-  // Check periods on mount
+  // On mount: determine which periods to show
   useEffect(() => {
-    findFirstPeriodWithOrders();
+    determineVisiblePeriods();
   }, []);
 
-  // Fetch stats when period changes (but not on initial load - we already have data)
+  // Fetch stats when period changes
   useEffect(() => {
     if (period === null || loadingCounts) return;
 
@@ -167,10 +179,7 @@ export default function StatsPage() {
         fetchStats(period, customStart, customEnd);
       }
     } else {
-      // Only fetch if we don't already have stats for this period
-      if (!stats || stats.period !== period) {
-        fetchStats(period);
-      }
+      fetchStats(period);
     }
   }, [period, customStart, customEnd, loadingCounts]);
 
@@ -192,7 +201,6 @@ export default function StatsPage() {
       <div className="w-full max-w-xl">
         <AppNav />
 
-        {/* Page Title */}
         <h1 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
           <span>📊</span>
           <span>Stats</span>
@@ -225,7 +233,6 @@ export default function StatsPage() {
                     {periodLabels[p]}
                   </button>
                 ))}
-                {/* Always show Custom */}
                 <button
                   type="button"
                   onClick={() => {
@@ -254,7 +261,6 @@ export default function StatsPage() {
             </>
           )}
 
-          {/* Custom Date Range Inputs */}
           {period === 'custom' && (
             <div className="mt-3 pt-3 border-t flex flex-wrap gap-3 items-end">
               <div className="flex-1 min-w-[130px]">
@@ -298,7 +304,6 @@ export default function StatsPage() {
           <div className="space-y-4">
             {/* Summary Cards */}
             <div className="grid grid-cols-2 gap-3">
-              {/* Revenue Card */}
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                   Revenue
@@ -311,7 +316,6 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              {/* Profit Card */}
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                   Profit
@@ -324,7 +328,6 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              {/* Avg Order Value Card */}
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                   Avg Order
@@ -337,7 +340,6 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              {/* Total Cost Card */}
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                   Total Cost
@@ -426,7 +428,6 @@ export default function StatsPage() {
                 </p>
               ) : (
                 <>
-                  {/* Discount Summary */}
                   <div className="grid grid-cols-3 gap-2 mb-4">
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                       <div className="text-lg font-bold text-red-600">
@@ -454,7 +455,6 @@ export default function StatsPage() {
                     </div>
                   </div>
 
-                  {/* Discounted Orders List */}
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {stats.discountBreakdown.discountedOrders.map((order) => (
                       <div
