@@ -14,7 +14,7 @@ const menuItems: NavItem[] = [
   { href: '/orders', label: 'All Orders', icon: '📋' },
   { href: '/customers', label: 'Customers', icon: '👥' },
   { href: '/products', label: 'Products', icon: '📦' },
-  { href: '/stats', label: 'Stats', icon: '📊' },
+  // { href: '/stats', label: 'Stats', icon: '📊' }, // TODO: Uncomment to restore Stats page
 ];
 
 export default function AppNav() {
@@ -44,11 +44,6 @@ export default function AppNav() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [isOpen]);
-
-  // Close menu when route changes
-  useEffect(() => {
-    setIsOpen(false);
-  }, [pathname]);
 
   // Close on escape key
   useEffect(() => {
@@ -168,6 +163,7 @@ export default function AppNav() {
                 <>
                   <Link
                     href="/"
+                    onClick={() => setIsOpen(false)}
                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-blue-600 font-medium bg-blue-50"
                   >
                     <span className="w-5 text-center">✨</span>
@@ -183,6 +179,7 @@ export default function AppNav() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={() => setIsOpen(false)}
                     className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
                       isActive
                         ? 'bg-gray-100 text-black font-medium'

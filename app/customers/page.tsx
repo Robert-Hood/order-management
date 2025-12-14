@@ -440,7 +440,7 @@ export default function CustomersPage() {
             <div className="flex justify-between text-xs text-gray-600">
               <span>{customers.length} customer{customers.length !== 1 ? 's' : ''}</span>
               <span>
-                Total revenue: ₹
+                Total customer revenue: ₹
                 {customers.reduce((sum, c) => sum + c.totalSpent, 0).toFixed(0)}
               </span>
             </div>
