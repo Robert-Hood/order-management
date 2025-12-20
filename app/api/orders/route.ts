@@ -84,8 +84,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     
     // Pagination
-    const limit = url.searchParams.get('limit');
-    const take = limit ? Math.min(100, Math.max(1, parseInt(limit, 10))) : undefined;
+    const limit = Math.min(100, Number(url.searchParams.get('limit')) || 20);
     
     // Date range filters
     const startDate = url.searchParams.get('start');
@@ -94,8 +93,8 @@ export async function GET(req: NextRequest) {
     // Search filter (customer name or phone)
     const search = url.searchParams.get('search')?.trim();
     
-    // Product filter
-    const productId = url.searchParams.get('productId');
+    // Product filter - now supports multiple IDs comma-separated
+    const productIds = url.searchParams.get('productIds')?.split(',').filter(Boolean);
     
     // Discount filter: 'yes', 'no', or undefined for all
     const hasDiscount = url.searchParams.get('hasDiscount');
@@ -134,36 +133,52 @@ export async function GET(req: NextRequest) {
       where.discountPercent = { equals: 0 };
     }
 
-    // For product filter, we need to check if any order item has this product
-    // This requires a nested filter
-    if (productId) {
+    // For product filter, we need to check if any order item has one of these products
+    if (productIds && productIds.length > 0) {
       where.items = {
         some: {
-          productId: productId,
+          productId: { in: productIds },
         },
       };
     }
 
-    const orders = await prisma.order.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take,
-      include: {
-        customer: true,
-        items: {
-          include: {
-            product: true,
-            modifiers: {
-              include: {
-                modifier: true,
+    // Run queries in parallel
+    const [orders, aggregates] = await Promise.all([
+      // Get paginated orders
+      prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        include: {
+          customer: true,
+          items: {
+            include: {
+              product: true,
+              modifiers: {
+                include: {
+                  modifier: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+      // Get total count and sum for all matching orders
+      prisma.order.aggregate({
+        where,
+        _count: { id: true },
+        _sum: { amount: true },
+      }),
+    ]);
 
-    return NextResponse.json(orders);
+    const totalCount = aggregates._count.id;
+    const totalRevenue = aggregates._sum.amount ?? 0;
+
+    return NextResponse.json({
+      orders,
+      totalCount,
+      totalRevenue,
+    });
   } catch (err) {
     console.error('GET /api/orders error:', err);
     return NextResponse.json(

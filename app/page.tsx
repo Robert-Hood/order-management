@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import AppNav from '../components/AppNav';
+import EditOrderModal from '../components/EditOrderModal';
 
 type Product = {
   id: string;
@@ -101,6 +102,9 @@ export default function Home() {
     order: null,
   });
   const [deleting, setDeleting] = useState(false);
+
+  // Edit modal state
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
 
   // Build detailed view of items with product info, toppings, & line totals
   const detailedItems = items
@@ -205,15 +209,17 @@ export default function Home() {
         throw new Error(data?.error || 'Failed to load orders');
       }
 
-      const data = (await res.json()) as Order[];
+      const data = await res.json();
+      const fetchedOrders = data.orders as Order[];
+      const totalCount = data.totalCount as number;
       
       // Check if there are more orders than requested
-      if (data.length > limit) {
+      if (fetchedOrders.length > limit) {
         setHasMoreOrders(true);
-        setOrders(data.slice(0, limit));
+        setOrders(fetchedOrders.slice(0, limit));
       } else {
-        setHasMoreOrders(false);
-        setOrders(data);
+        setHasMoreOrders(totalCount > fetchedOrders.length);
+        setOrders(fetchedOrders);
       }
     } catch (err) {
       console.error(err);
@@ -287,6 +293,11 @@ export default function Home() {
     } finally {
       setDeleting(false);
     }
+  }
+
+  function handleOrderUpdated(updatedOrder: Order) {
+    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    setEditingOrder(null);
   }
 
   useEffect(() => {
@@ -724,12 +735,16 @@ export default function Home() {
           {orders.map(order => (
             <div
               key={order.id}
-              className="bg-white rounded-lg shadow p-3 relative overflow-visible"
+              className="bg-white rounded-lg shadow p-3 relative overflow-visible cursor-pointer hover:bg-gray-50 transition-colors"
+              onClick={() => setEditingOrder(order)}
             >
               {/* Delete button - overlapping top right corner */}
               <button
                 type="button"
-                onClick={() => setDeleteModal({ open: true, order })}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteModal({ open: true, order });
+                }}
                 className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-gray-200 hover:bg-red-500 text-gray-500 hover:text-white transition-colors flex items-center justify-center shadow-sm"
                 aria-label="Delete order"
               >
@@ -751,8 +766,9 @@ export default function Home() {
 
               <div className="flex justify-between items-center">
                 <div className="text-xs">
-                  <div className="font-semibold text-sm text-black">
+                  <div className="font-semibold text-sm text-black flex items-center gap-1">
                     {order.customerName}
+                    <span className="text-[10px] text-gray-400">✎</span>
                   </div>
                   <div className="text-xs text-gray-700">
                     {order.customerPhone}
@@ -925,6 +941,15 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <EditOrderModal
+          order={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onSaved={handleOrderUpdated}
+        />
       )}
 
       <style jsx>{`

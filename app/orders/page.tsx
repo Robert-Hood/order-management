@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import AppNav from '../../components/AppNav';
+import EditOrderModal from '../../components/EditOrderModal';
 
 type Product = {
     id: string;
     name: string;
     price: number;
-};
-
+    cost: number;
+    isActive: boolean;
+    hasModifiers: boolean;
+    createdAt: string;
+  };
+  
 type OrderItemModifier = {
     id: string;
     nameAtTime: string;
@@ -59,12 +64,21 @@ export default function OrdersPage() {
     });
     const [deleting, setDeleting] = useState(false);
 
+    // Edit modal state
+    const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+
+    // Pagination state
+    const [limit, setLimit] = useState(20);
+    const [totalCount, setTotalCount] = useState(0);
+    const [totalRevenue, setTotalRevenue] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
+
     // Filter state
     const [showFilters, setShowFilters] = useState(false);
     const [search, setSearch] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [productFilter, setProductFilter] = useState('');
+    const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
     const [discountFilter, setDiscountFilter] = useState<'all' | 'yes' | 'no'>('all');
 
     // Debounce search
@@ -100,13 +114,16 @@ export default function OrdersPage() {
         }
     }
 
-    async function fetchOrders() {
+    async function fetchOrders(currentLimit: number, isLoadingMore: boolean = false) {
         try {
-            setLoading(true);
+            if (!isLoadingMore) {
+                setLoading(true);
+            }
             setError(null);
 
             // Build query params
             const params = new URLSearchParams();
+            params.set('limit', String(currentLimit + 1)); // Fetch one extra to check if more exist
             
             if (debouncedSearch) {
                 params.set('search', debouncedSearch);
@@ -117,15 +134,14 @@ export default function OrdersPage() {
             if (endDate) {
                 params.set('end', endDate);
             }
-            if (productFilter) {
-                params.set('productId', productFilter);
+            if (selectedProductIds.length > 0) {
+                params.set('productIds', selectedProductIds.join(','));
             }
             if (discountFilter !== 'all') {
                 params.set('hasDiscount', discountFilter);
             }
 
-            const queryString = params.toString();
-            const url = `/api/orders${queryString ? `?${queryString}` : ''}`;
+            const url = `/api/orders?${params.toString()}`;
 
             const res = await fetch(url);
             if (!res.ok) {
@@ -133,15 +149,29 @@ export default function OrdersPage() {
                 throw new Error(data?.error || 'Failed to load orders');
             }
 
-            const data = (await res.json()) as Order[];
-            setOrders(data);
+            const data = await res.json();
+            
+            // API now returns { orders, totalCount, totalRevenue }
+            const fetchedOrders = data.orders as Order[];
+            setTotalCount(data.totalCount);
+            setTotalRevenue(data.totalRevenue);
+            
+            // Check if there are more orders than requested
+            if (fetchedOrders.length > currentLimit) {
+                setOrders(fetchedOrders.slice(0, currentLimit));
+            } else {
+                setOrders(fetchedOrders);
+            }
         } catch (err) {
             console.error(err);
             const message =
                 err instanceof Error ? err.message : 'Failed to load orders';
             setError(message);
         } finally {
-            setLoading(false);
+            if (!isLoadingMore) {
+                setLoading(false);
+            }
+            setLoadingMore(false);
         }
     }
 
@@ -159,8 +189,10 @@ export default function OrdersPage() {
                 throw new Error(data?.error || 'Failed to delete order');
             }
 
-            // Remove from local state
+            // Remove from local state and update counts
             setOrders((prev) => prev.filter((o) => o.id !== deleteModal.order!.id));
+            setTotalCount(prev => prev - 1);
+            setTotalRevenue(prev => prev - deleteModal.order!.amount);
             setDeleteModal({ open: false, order: null });
         } catch (err) {
             console.error(err);
@@ -170,27 +202,49 @@ export default function OrdersPage() {
         }
     }
 
+    function handleOrderUpdated(updatedOrder: Order) {
+        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+        setEditingOrder(null);
+        // Refetch to update totals
+        fetchOrders(limit);
+    }
+
     function clearFilters() {
         setSearch('');
         setStartDate('');
         setEndDate('');
-        setProductFilter('');
+        setSelectedProductIds([]);
         setDiscountFilter('all');
     }
 
-    const hasActiveFilters = debouncedSearch || startDate || endDate || productFilter || discountFilter !== 'all';
+    function toggleProductFilter(productId: string) {
+        setSelectedProductIds(prev => 
+            prev.includes(productId)
+                ? prev.filter(id => id !== productId)
+                : [...prev, productId]
+        );
+    }
+
+    async function handleShowMore() {
+        const newLimit = limit + 20;
+        setLimit(newLimit);
+        setLoadingMore(true);
+        await fetchOrders(newLimit, true);
+    }
+
+    const hasActiveFilters = debouncedSearch || startDate || endDate || selectedProductIds.length > 0 || discountFilter !== 'all';
+    const hasMoreOrders = orders.length < totalCount;
+    const avgRevenuePerOrder = totalCount > 0 ? totalRevenue / totalCount : 0;
 
     useEffect(() => {
         fetchProducts();
     }, []);
 
+    // Reset limit when filters change
     useEffect(() => {
-        fetchOrders();
-    }, [debouncedSearch, startDate, endDate, productFilter, discountFilter]);
-
-    // Calculate summary stats for filtered results
-    const totalRevenue = orders.reduce((sum, o) => sum + o.amount, 0);
-    const totalDiscount = orders.reduce((sum, o) => sum + o.discountAmount, 0);
+        setLimit(20);
+        fetchOrders(20);
+    }, [debouncedSearch, startDate, endDate, selectedProductIds, discountFilter]);
 
     return (
         <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
@@ -278,38 +332,56 @@ export default function OrdersPage() {
                             </div>
                         </div>
 
-                        {/* Product & Discount Filters */}
-                        <div className="grid grid-cols-2 gap-3">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">
-                                    Product
-                                </label>
-                                <select
-                                    value={productFilter}
-                                    onChange={(e) => setProductFilter(e.target.value)}
-                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
-                                >
-                                    <option value="">All products</option>
-                                    {products.map((p) => (
-                                        <option key={p.id} value={p.id}>
+                        {/* Product Filter - Multi-select chips */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                                Products {selectedProductIds.length > 0 && `(${selectedProductIds.length} selected)`}
+                            </label>
+                            <div className="flex flex-wrap gap-1.5">
+                                {products.map((p) => {
+                                    const isSelected = selectedProductIds.includes(p.id);
+                                    return (
+                                        <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={() => toggleProductFilter(p.id)}
+                                            className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                                                isSelected
+                                                    ? 'bg-blue-600 text-white border-blue-600'
+                                                    : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+                                            }`}
+                                        >
                                             {p.name}
-                                        </option>
-                                    ))}
-                                </select>
+                                        </button>
+                                    );
+                                })}
                             </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-600 mb-1">
-                                    Discount
-                                </label>
-                                <select
-                                    value={discountFilter}
-                                    onChange={(e) => setDiscountFilter(e.target.value as 'all' | 'yes' | 'no')}
-                                    className="w-full border rounded px-2 py-1.5 text-sm text-black"
-                                >
-                                    <option value="all">All orders</option>
-                                    <option value="yes">With discount</option>
-                                    <option value="no">No discount</option>
-                                </select>
+                        </div>
+
+                        {/* Discount Filter */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Discount
+                            </label>
+                            <div className="flex gap-2">
+                                {[
+                                    { value: 'all', label: 'All' },
+                                    { value: 'yes', label: 'With discount' },
+                                    { value: 'no', label: 'No discount' },
+                                ].map((opt) => (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => setDiscountFilter(opt.value as 'all' | 'yes' | 'no')}
+                                        className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                                            discountFilter === opt.value
+                                                ? 'bg-blue-600 text-white border-blue-600'
+                                                : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+                                        }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
@@ -323,24 +395,6 @@ export default function OrdersPage() {
                                 Clear all filters
                             </button>
                         )}
-                    </div>
-                )}
-
-                {/* Results Summary */}
-                {!loading && orders.length > 0 && (
-                    <div className="bg-white rounded-lg shadow p-3 mb-4">
-                        <div className="flex justify-between text-xs text-gray-600">
-                            <span>
-                                {orders.length} order{orders.length !== 1 ? 's' : ''}
-                                {hasActiveFilters && ' (filtered)'}
-                            </span>
-                            <div className="flex gap-4">
-                                <span>Revenue: <strong className="text-green-600">₹{totalRevenue.toFixed(0)}</strong></span>
-                                {totalDiscount > 0 && (
-                                    <span>Discounts: <strong className="text-red-600">₹{totalDiscount.toFixed(0)}</strong></span>
-                                )}
-                            </div>
-                        </div>
                     </div>
                 )}
 
@@ -395,12 +449,16 @@ export default function OrdersPage() {
                     {orders.map(order => (
                         <div
                             key={order.id}
-                            className="bg-white rounded-lg shadow p-3 text-xs relative overflow-visible"
+                            className="bg-white rounded-lg shadow p-3 text-xs relative overflow-visible cursor-pointer hover:bg-gray-50 transition-colors"
+                            onClick={() => setEditingOrder(order)}
                         >
                             {/* Delete button - overlapping top right corner */}
                             <button
                                 type="button"
-                                onClick={() => setDeleteModal({ open: true, order })}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteModal({ open: true, order });
+                                }}
                                 className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-gray-200 hover:bg-red-500 text-gray-500 hover:text-white transition-colors flex items-center justify-center shadow-sm"
                                 aria-label="Delete order"
                             >
@@ -422,8 +480,9 @@ export default function OrdersPage() {
 
                             <div className="flex justify-between gap-3">
                                 <div className="flex-1">
-                                    <div className="font-semibold text-sm text-black">
+                                    <div className="font-semibold text-sm text-black flex items-center gap-1">
                                         {order.customerName}
+                                        <span className="text-[10px] text-gray-400">✎</span>
                                     </div>
                                     <div className="text-xs text-gray-700">
                                         {order.customerPhone}
@@ -502,6 +561,43 @@ export default function OrdersPage() {
                         </div>
                     ))}
                 </div>
+
+                {/* Show more button */}
+                {hasMoreOrders && !loading && orders.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={handleShowMore}
+                        disabled={loadingMore}
+                        className="w-full mt-3 py-2 px-4 rounded-lg border border-gray-300 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-60"
+                    >
+                        {loadingMore ? (
+                            <span className="flex items-center justify-center gap-2">
+                                <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Loading more...
+                            </span>
+                        ) : (
+                            'Show more orders'
+                        )}
+                    </button>
+                )}
+
+                {/* Footer Stats */}
+                {!loading && orders.length > 0 && (
+                    <div className="mt-3 flex justify-between items-center text-xs text-gray-500 px-1">
+                        <span>
+                            {orders.length < totalCount
+                                ? `Showing ${orders.length} of ${totalCount} orders`
+                                : `${totalCount} order${totalCount !== 1 ? 's' : ''}`}
+                            {hasActiveFilters && ' (filtered)'}
+                        </span>
+                        <span>
+                            Avg revenue/order: <strong className="text-gray-700">₹{avgRevenuePerOrder.toFixed(0)}</strong>
+                        </span>
+                    </div>
+                )}
             </div>
 
             {/* Delete Confirmation Modal */}
@@ -576,6 +672,15 @@ export default function OrdersPage() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Edit Order Modal */}
+            {editingOrder && (
+                <EditOrderModal
+                    order={editingOrder}
+                    onClose={() => setEditingOrder(null)}
+                    onSaved={handleOrderUpdated}
+                />
             )}
 
             <style jsx>{`

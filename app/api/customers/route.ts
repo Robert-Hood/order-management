@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../lib/db';
 
-// GET /api/customers - List all customers
+// GET /api/customers - List all customers with stats
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const search = url.searchParams.get('search') ?? '';
-    const limit = Math.min(50, Number(url.searchParams.get('limit')) || 50);
+    const limit = Math.min(100, Number(url.searchParams.get('limit')) || 20);
 
     const whereClause = search
       ? {
@@ -17,18 +17,35 @@ export async function GET(req: NextRequest) {
         }
       : {};
 
-    const customers = await prisma.customer.findMany({
-      where: whereClause,
-      orderBy: { lastOrderAt: 'desc' },
-      take: limit,
-      include: {
-        _count: {
-          select: { orders: true },
+    // Run both queries in parallel for better performance
+    const [customers, aggregates] = await Promise.all([
+      // Get paginated customers
+      prisma.customer.findMany({
+        where: whereClause,
+        orderBy: { orderCount: 'desc' },
+        take: limit,
+        include: {
+          _count: {
+            select: { orders: true },
+          },
         },
-      },
-    });
+      }),
+      // Get total count and sum of totalSpent for all matching customers
+      prisma.customer.aggregate({
+        where: whereClause,
+        _count: { id: true },
+        _sum: { totalSpent: true },
+      }),
+    ]);
 
-    return NextResponse.json(customers);
+    const totalCount = aggregates._count.id;
+    const totalRevenue = aggregates._sum.totalSpent ?? 0;
+
+    return NextResponse.json({
+      customers,
+      totalCount,
+      totalRevenue,
+    });
   } catch (err) {
     console.error('GET /api/customers error:', err);
     return NextResponse.json(

@@ -50,10 +50,28 @@ type CustomerWithOrders = Customer & {
   orders: Order[];
 };
 
+type CustomersResponse = {
+  customers: Customer[];
+  totalCount: number;
+  totalRevenue: number;
+};
+
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Aggregate stats from API
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+
+  // Pagination state
+  const [visibleCount, setVisibleCount] = useState(20);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Search state
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Expanded customer state
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
@@ -67,19 +85,47 @@ export default function CustomersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function fetchCustomers() {
+  // Edit customer modal state
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      // Reset pagination when search changes
+      setVisibleCount(20);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  async function fetchCustomers(limit: number = 20, isLoadingMore: boolean = false) {
     try {
-      setLoading(true);
+      if (!isLoadingMore) {
+        setLoading(true);
+      }
       setError(null);
 
-      const res = await fetch('/api/customers');
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (debouncedSearch) {
+        params.set('search', debouncedSearch);
+      }
+
+      const res = await fetch(`/api/customers?${params.toString()}`);
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || 'Failed to load customers');
       }
 
-      const data = (await res.json()) as Customer[];
-      setCustomers(data);
+      const data = (await res.json()) as CustomersResponse;
+      
+      setCustomers(data.customers);
+      setTotalCount(data.totalCount);
+      setTotalRevenue(data.totalRevenue);
     } catch (err) {
       console.error(err);
       const message =
@@ -87,6 +133,7 @@ export default function CustomersPage() {
       setError(message);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
@@ -111,8 +158,15 @@ export default function CustomersPage() {
   }
 
   useEffect(() => {
-    fetchCustomers();
-  }, []);
+    fetchCustomers(visibleCount);
+  }, [debouncedSearch]);
+
+  async function handleShowMore() {
+    const newCount = visibleCount + 20;
+    setVisibleCount(newCount);
+    setLoadingMore(true);
+    await fetchCustomers(newCount, true);
+  }
 
   async function toggleExpand(customerId: string) {
     if (expandedCustomerId === customerId) {
@@ -145,8 +199,6 @@ export default function CustomersPage() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        // 409 = duplicate phone - expected business logic, not an error
-        // Just show the message to user without console.error
         setFormError(data?.error || 'Failed to create customer');
         return;
       }
@@ -155,13 +207,67 @@ export default function CustomersPage() {
       setNewName('');
       setNewPhone('');
       setShowAddForm(false);
-      await fetchCustomers();
+      await fetchCustomers(visibleCount);
     } catch (err) {
-      // Only log unexpected errors (network failures, etc.)
       console.error('Unexpected error creating customer:', err);
       setFormError('Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // Open edit modal
+  function openEditCustomer(customer: Customer, e: React.MouseEvent) {
+    e.stopPropagation(); // Prevent expand/collapse
+    setEditingCustomer(customer);
+    setEditName(customer.name);
+    setEditPhone(customer.phone);
+    setEditError(null);
+  }
+
+  // Close edit modal
+  function closeEditModal() {
+    setEditingCustomer(null);
+    setEditName('');
+    setEditPhone('');
+    setEditError(null);
+  }
+
+  // Save customer edit
+  async function handleSaveCustomerEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingCustomer) return;
+
+    setEditError(null);
+    setSavingEdit(true);
+
+    try {
+      const res = await fetch(`/api/customers/${editingCustomer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          phone: editPhone.trim(),
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setEditError(data?.error || 'Failed to update customer');
+        return;
+      }
+
+      // Update local state
+      setCustomers(prev =>
+        prev.map(c => (c.id === data.id ? { ...c, name: data.name, phone: data.phone } : c)),
+      );
+      closeEditModal();
+    } catch (err) {
+      console.error(err);
+      setEditError('Something went wrong. Please try again.');
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -190,6 +296,12 @@ export default function CustomersPage() {
     return phone;
   }
 
+  // Calculate if there are more customers to show
+  const hasMore = customers.length < totalCount;
+  
+  // Calculate average revenue per customer
+  const avgRevenue = totalCount > 0 ? totalRevenue / totalCount : 0;
+
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center p-4 text-black">
       <div className="w-full max-w-xl">
@@ -200,6 +312,56 @@ export default function CustomersPage() {
           <span>👥</span>
           <span>Customers</span>
         </h1>
+
+        {/* Search Bar */}
+        <div className="mb-4">
+          <div className="relative">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or phone..."
+              className="w-full border rounded-lg px-3 py-2 pl-10 text-sm text-black bg-white"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* Add Customer Section */}
         <div className="mb-4">
@@ -292,21 +454,39 @@ export default function CustomersPage() {
         )}
 
         {loading && (
-          <p className="text-sm text-gray-700">Loading customers...</p>
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <div className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-sm text-gray-700">Loading customers...</span>
+            </div>
+          </div>
         )}
 
         {!loading && customers.length === 0 && !error && (
           <div className="bg-white rounded-lg shadow p-4 text-center">
             <p className="text-sm text-gray-700 mb-2">
-              No customers yet.
+              {debouncedSearch ? 'No customers match your search.' : 'No customers yet.'}
             </p>
-            <p className="text-xs text-gray-500">
-              Customers are automatically created when orders include a phone number, or add one manually above.
-            </p>
+            {debouncedSearch ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Clear search
+              </button>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Customers are automatically created when orders include a phone number, or add one manually above.
+              </p>
+            )}
           </div>
         )}
 
-        <div className="space-y-2">
+        <div className={`space-y-2 ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
           {customers.map(customer => (
             <div
               key={customer.id}
@@ -319,9 +499,13 @@ export default function CustomersPage() {
                 className="w-full p-3 text-left hover:bg-gray-50 transition-colors"
               >
                 <div className="flex justify-between items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm text-black truncate">
+                  <div
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={(e) => openEditCustomer(customer, e)}
+                  >
+                    <div className="font-semibold text-sm text-black truncate flex items-center gap-1">
                       {customer.name}
+                      <span className="text-[10px] text-gray-400">✎</span>
                     </div>
                     <div className="text-xs text-gray-600 mt-0.5">
                       {formatPhone(customer.phone)}
@@ -434,19 +618,167 @@ export default function CustomersPage() {
           ))}
         </div>
 
+        {/* Show more button */}
+        {hasMore && !loading && (
+          <button
+            type="button"
+            onClick={handleShowMore}
+            disabled={loadingMore}
+            className="w-full mt-4 py-2 px-4 rounded-lg border border-gray-300 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            {loadingMore ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Loading more...
+              </span>
+            ) : (
+              'Show more customers'
+            )}
+          </button>
+        )}
+
         {/* Stats summary at bottom */}
-        {!loading && customers.length > 0 && (
+        {!loading && totalCount > 0 && (
           <div className="mt-4 bg-white rounded-lg shadow p-3">
             <div className="flex justify-between text-xs text-gray-600">
-              <span>{customers.length} customer{customers.length !== 1 ? 's' : ''}</span>
               <span>
-                Total customer revenue: ₹
-                {customers.reduce((sum, c) => sum + c.totalSpent, 0).toFixed(0)}
+                {hasMore
+                  ? `Showing ${customers.length} of ${totalCount} customers`
+                  : `${totalCount} customer${totalCount !== 1 ? 's' : ''}`}
+                {debouncedSearch && ' (filtered)'}
+              </span>
+              <span>
+                Avg revenue/customer: ₹{avgRevenue.toFixed(0)}
               </span>
             </div>
           </div>
         )}
       </div>
+
+      {/* Edit Customer Modal */}
+      {editingCustomer && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4"
+          onClick={() => !savingEdit && closeEditModal()}
+        >
+          <div
+            className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 space-y-4 animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-900">
+                Edit Customer
+              </h3>
+              <button
+                type="button"
+                onClick={closeEditModal}
+                disabled={savingEdit}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCustomerEdit} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-black">
+                  Name
+                </label>
+                <input
+                  className="w-full border rounded px-3 py-2 text-sm text-black"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1 text-black">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  className="w-full border rounded px-3 py-2 text-sm text-black"
+                  value={editPhone}
+                  onChange={e => {
+                    const value = e.target.value.replace(/\D/g, '');
+                    if (value.length <= 10) {
+                      setEditPhone(value);
+                    }
+                  }}
+                  maxLength={10}
+                  required
+                />
+                {editPhone.length > 0 && editPhone.length < 10 && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Phone number must be exactly 10 digits
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <strong>Note:</strong> Changes will update this customer&apos;s name and phone across all their linked orders.
+              </div>
+
+              {editError && (
+                <p className="text-sm text-red-600">{editError}</p>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={savingEdit}
+                  className="flex-1 px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit || editPhone.length !== 10}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes slide-up {
+          from {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .animate-slide-up {
+          animation: slide-up 0.2s ease-out;
+        }
+        @media (min-width: 640px) {
+          @keyframes slide-up {
+            from {
+              transform: scale(0.95);
+              opacity: 0;
+            }
+            to {
+              transform: scale(1);
+              opacity: 1;
+            }
+          }
+        }
+      `}</style>
     </main>
   );
 }

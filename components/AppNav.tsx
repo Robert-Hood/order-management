@@ -14,7 +14,7 @@ const menuItems: NavItem[] = [
   { href: '/orders', label: 'All Orders', icon: '📋' },
   { href: '/customers', label: 'Customers', icon: '👥' },
   { href: '/products', label: 'Products', icon: '📦' },
-  // { href: '/stats', label: 'Stats', icon: '📊' }, // TODO: Uncomment to restore Stats page
+  { href: '/stats', label: 'Stats', icon: '📊' }
 ];
 
 export default function AppNav() {
